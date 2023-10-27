@@ -147,7 +147,7 @@ func (c *rootContext) RunE(cmd *cobra.Command, args []string) (err error) {
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: failed to migrate repo %s: %v\n", repoDir, err)
 			} else {
-				fmt.Printf("Successfully migrated %s", repoDir)
+				fmt.Printf("Successfully migrated %s\n", repoDir)
 			}
 		}(repoDir)
 	}
