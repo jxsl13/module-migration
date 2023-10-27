@@ -121,41 +121,29 @@ func (c *rootContext) RunE(cmd *cobra.Command, args []string) (err error) {
 		targetUrlMap[v] = true
 	}
 
-	gitFolders := make(map[string]bool, 512)
-	gitDirMatcher := regexp.MustCompile(sep + `\.git$`)
-
-	err = cwalk.Walk(c.RootPath, func(path string, info fs.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// collect git dirs
-		if gitDirMatcher.MatchString(path) && info.IsDir() {
-			gitFolders[path] = true
-		}
-		return nil
-	})
+	gitDirs, err := findGitDirs(c.RootPath)
 	if err != nil {
-		return err
-	}
-
-	_, err = replace(c.RootPath, c.Config.ExcludeRegex(), c.Config.IncludeRegex(), importReplacer)
-	if err != nil {
-		return err
-	}
-
-	if c.Config.BranchName == "" {
-		fmt.Println("Done!")
-		return nil
+		return fmt.Errorf("failed to find git folders: %w", err)
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(len(gitFolders))
-	for _, gitPath := range sortedKeys(gitFolders) {
+	wg.Add(len(gitDirs))
+	for _, gitPath := range gitDirs {
 		repoDir := filepath.Dir(gitPath)
 		go func(repoDir string) {
 			defer wg.Done()
-			err := migrateRepo(c.Ctx, gitUrlMap, targetUrlMap, repoDir, c.Config.RemoteName, c.Config.BranchName, c.Config.Additional())
+			err := migrateRepo(
+				c.Ctx,
+				gitUrlMap,
+				targetUrlMap,
+				repoDir,
+				c.Config.RemoteName,
+				c.Config.BranchName,
+				c.Config.Additional(),
+				c.Config.ExcludeRegex(),
+				c.Config.IncludeRegex(),
+				importReplacer,
+			)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: failed to migrate repo %s: %v\n", repoDir, err)
 			} else {
@@ -260,34 +248,57 @@ func removeEmptyLines(lines []string) []string {
 	return filtered
 }
 
-func branchName(ctx context.Context, workDir string) (branch string, err error) {
-	lines, err := ExecuteQuietPathApplicationWithOutput(ctx, workDir, "git", "rev-parse", "--abbrev-ref", "HEAD")
+var gitDirMatcher = regexp.MustCompile(sep + `\.git$`)
+
+func findGitDirs(rootPath string) ([]string, error) {
+	gitFolders := make(map[string]bool, 512)
+
+	err := cwalk.Walk(rootPath, func(path string, info fs.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// collect git dirs
+		if gitDirMatcher.MatchString(path) && info.IsDir() {
+			gitFolders[path] = true
+		}
+		return nil
+	})
 	if err != nil {
-		return "", fmt.Errorf("skipping git repo %s: failed to get current branch name: %v", workDir, err)
+		return nil, err
 	}
-	lines = removeEmptyLines(lines)
-	if len(lines) != 1 {
-		return "", fmt.Errorf("expected only one line when checking current branch name: %s", strings.Join(lines, "\n"))
-	}
-	return lines[0], nil
+
+	return sortedKeys(gitFolders), nil
+
 }
 
-func migrateRepo(ctx context.Context, gitUrlMap map[string]string, targetUrlMap map[string]bool, repoDir, remoteName string, targetBranch string, additionalFiles []string) error {
-	lines, err := ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "remote", "get-url", "--all", remoteName)
+func migrateRepo(ctx context.Context,
+	gitUrlMap map[string]string,
+	targetUrlMap map[string]bool,
+	repoDir,
+	remoteName string,
+	targetBranch string,
+	additionalFiles []string,
+	exclude, include []*regexp.Regexp,
+	importReplacer *strings.Replacer,
+) error {
+
+	_, err := replace(repoDir, exclude, include, importReplacer)
 	if err != nil {
 		return err
 	}
-	lines = removeEmptyLines(lines)
-	if len(lines) != 1 {
-		return fmt.Errorf("expected only one line: \n %s", strings.Join(lines, "\n"))
+
+	// do not continue if no branch is set
+	if targetBranch == "" {
+		return nil
 	}
 
-	line := lines[0]
-	cmpUrl, err := giturls.Parse(line)
+	_, _ = ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "pull")
+
+	repoUrl, err := getRemoteUrl(ctx, repoDir, remoteName)
 	if err != nil {
-		return fmt.Errorf("invalid git url in repo: %s: url: %s", repoDir, line)
+		return err
 	}
-	repoUrl := cmpUrl.String()
 
 	targetUrl, found := gitUrlMap[repoUrl]
 	if found {
@@ -299,12 +310,9 @@ func migrateRepo(ctx context.Context, gitUrlMap map[string]string, targetUrlMap 
 		if err != nil {
 			return fmt.Errorf("skipping git repo %s: with remote %s url: %s: target repo %s: failed to set remote url: %w", repoDir, remoteName, repoUrl, targetUrl, err)
 		}
-
-		fmt.Printf("changed remote url of %s from %s to %s (%s)\n", repoDir, repoUrl, targetUrl, remoteName)
 	} else if targetUrlMap[repoUrl] {
 		// nothing todo, already target url
 		targetUrl = repoUrl
-		fmt.Printf("remote url of %s is already a target url %s (%s)\n", repoDir, targetUrl, remoteName)
 	} else {
 		return fmt.Errorf("skipping git repo %s: with remote %s url: %s: not found in csv file", repoDir, remoteName, repoUrl)
 	}
@@ -323,8 +331,6 @@ func migrateRepo(ctx context.Context, gitUrlMap map[string]string, targetUrlMap 
 	if err == nil {
 		return fmt.Errorf("skipping git repo %s: with remote %s url: %s: target repo %s: no changes", repoDir, remoteName, repoUrl, targetUrl)
 	}
-
-	// rc != 0 => git found changes
 
 	currentBranch, err := branchName(ctx, repoDir)
 	if err != nil {
@@ -370,4 +376,34 @@ func migrateRepo(ctx context.Context, gitUrlMap map[string]string, targetUrlMap 
 	}
 
 	return nil
+}
+
+func getRemoteUrl(ctx context.Context, repoDir, remoteName string) (url string, err error) {
+	lines, err := ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "remote", "get-url", "--all", remoteName)
+	if err != nil {
+		return "", err
+	}
+	lines = removeEmptyLines(lines)
+	if len(lines) != 1 {
+		return "", fmt.Errorf("expected only one line: \n %s", strings.Join(lines, "\n"))
+	}
+
+	line := lines[0]
+	cmpUrl, err := giturls.Parse(line)
+	if err != nil {
+		return "", fmt.Errorf("invalid git url in repo: %s: url: %s", repoDir, line)
+	}
+	return cmpUrl.String(), nil
+}
+
+func branchName(ctx context.Context, workDir string) (branch string, err error) {
+	lines, err := ExecuteQuietPathApplicationWithOutput(ctx, workDir, "git", "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("skipping git repo %s: failed to get current branch name: %v", workDir, err)
+	}
+	lines = removeEmptyLines(lines)
+	if len(lines) != 1 {
+		return "", fmt.Errorf("expected only one line when checking current branch name: %s", strings.Join(lines, "\n"))
+	}
+	return lines[0], nil
 }
