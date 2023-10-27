@@ -23,4 +23,7 @@ module-migration ./ --csv mapping.csv --separator ';' --old 'Repo-clone-url' --n
 # or by column index
 
 module-migration ./ --csv mapping.csv --separator ';' --old 0 --new 1
+
+
+module-migration /home/user/sourceDir --csv /home/behm015/Desktop/module-migration/replace.csv --old Repo-clone-url --new Target-Clone-Url --separator ";" --branch chore/migrate-imports --copy /home/user/GitHubMigration/.github
 ```

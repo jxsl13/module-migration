@@ -1,3 +1,4 @@
 *.csv
 module-migration
 .vscode/*
+tmp/*

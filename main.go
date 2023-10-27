@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -11,8 +10,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/jxsl13/cwalk"
 	"github.com/jxsl13/module-migration/config"
@@ -20,6 +19,8 @@ import (
 	"github.com/spf13/cobra"
 	giturls "github.com/whilp/git-urls"
 )
+
+var ghAvailable = IsApplicationAvailable(context.Background(), "gh")
 
 func main() {
 	err := NewRootCmd().Execute()
@@ -138,13 +139,9 @@ func (c *rootContext) RunE(cmd *cobra.Command, args []string) (err error) {
 		return err
 	}
 
-	touchedFiles, err := replace(c.RootPath, c.Config.ExcludeRegex(), c.Config.IncludeRegex(), importReplacer)
+	_, err = replace(c.RootPath, c.Config.ExcludeRegex(), c.Config.IncludeRegex(), importReplacer)
 	if err != nil {
 		return err
-	}
-
-	for _, f := range touchedFiles {
-		fmt.Println(f)
 	}
 
 	if c.Config.BranchName == "" {
@@ -152,135 +149,21 @@ func (c *rootContext) RunE(cmd *cobra.Command, args []string) (err error) {
 		return nil
 	}
 
-	pullRequestUrls := make([]string, 0, 32)
-	defer func() {
-		if len(pullRequestUrls) > 0 {
-			fmt.Println("Pull Request URLs:")
-		} else {
-			return
-		}
-		sort.Strings(pullRequestUrls)
-		for _, url := range pullRequestUrls {
-			fmt.Println(url)
-		}
-	}()
-
+	var wg sync.WaitGroup
+	wg.Add(len(gitFolders))
 	for _, gitPath := range sortedKeys(gitFolders) {
 		repoDir := filepath.Dir(gitPath)
-
-		// print for reference
-		if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
-			sock := fmt.Sprintf("%s=%s", "SSH_AUTH_SOCK", sock)
-			fmt.Println(sock)
-		}
-
-		lines, err := ExecuteQuietPathApplicationWithOutput(c.Ctx, repoDir, "git", "remote", "get-url", "--all", c.Config.RemoteName)
-		if err != nil {
-			return err
-		}
-		lines = removeEmptyLines(lines)
-		if len(lines) != 1 {
-			return fmt.Errorf("expected only one line: \n %s", strings.Join(lines, "\n"))
-		}
-
-		line := lines[0]
-		cmpUrl, err := giturls.Parse(line)
-		if err != nil {
-			return fmt.Errorf("invalid git url in repo: %s: url: %s", repoDir, line)
-		}
-		repoUrl := cmpUrl.String()
-
-		targetUrl, found := gitUrlMap[repoUrl]
-		if found {
-			// remove remote url
-			_, _ = ExecuteQuietPathApplicationWithOutput(c.Ctx, repoDir, "git", "remote", "remove", c.Config.RemoteName)
-
-			// add remote url
-			_, err = ExecuteQuietPathApplicationWithOutput(c.Ctx, repoDir, "git", "remote", "add", c.Config.RemoteName, targetUrl)
+		go func(repoDir string) {
+			defer wg.Done()
+			err := migrateRepo(c.Ctx, gitUrlMap, targetUrlMap, repoDir, c.Config.RemoteName, c.Config.BranchName, c.Config.Additional())
 			if err != nil {
-				fmt.Printf("skipping git repo %s: with remote %s url: %s: target repo %s: failed to set remote url: %v\n", repoDir, c.Config.RemoteName, repoUrl, targetUrl, err)
-				continue
+				fmt.Fprintf(os.Stderr, "Error: failed to migrate repo %s: %v\n", repoDir, err)
+			} else {
+				fmt.Printf("Successfully migrated %s", repoDir)
 			}
-
-			fmt.Printf("changed remote url of %s from %s to %s (%s)\n", repoDir, repoUrl, targetUrl, c.Config.RemoteName)
-		} else if targetUrlMap[repoUrl] {
-			// nothing todo, already target url
-			targetUrl = repoUrl
-			fmt.Printf("remote url of %s is already a target url %s (%s)\n", repoDir, targetUrl, c.Config.RemoteName)
-		} else {
-			fmt.Printf("skipping git repo %s: with remote %s url: %s: not found in csv file\n", repoDir, c.Config.RemoteName, repoUrl)
-			continue
-		}
-
-		// check if target url exists
-		_, err = ExecuteQuietPathApplicationWithOutput(c.Ctx, repoDir, "git", "ls-remote", targetUrl)
-		if err != nil {
-			fmt.Printf("skipping git repo %s: with remote %s url: %s: target repo %s does not exist: %v\n", repoDir, c.Config.RemoteName, repoUrl, targetUrl, err)
-			continue
-		}
-
-		// check if there are changes according to git
-		_, _ = ExecuteQuietPathApplicationWithOutput(c.Ctx, repoDir, "git", "update-index", "--refresh")
-
-		// returns rc = 1 if there are changes
-		_, err = ExecuteQuietPathApplicationWithOutput(c.Ctx, repoDir, "git", "diff-index", "--quiet", "HEAD", "--")
-		if err == nil {
-			fmt.Printf("skipping git repo %s: with remote %s url: %s: target repo %s: no changes\n", repoDir, c.Config.RemoteName, repoUrl, targetUrl)
-			continue
-		}
-
-		// rc != 0 => git found changes
-
-		lines, err = ExecuteQuietPathApplicationWithOutput(c.Ctx, repoDir, "git", "rev-parse", "--abbrev-ref", "HEAD")
-		if err != nil {
-			fmt.Printf("skipping git repo %s: with remote %s url: %s: target repo %s: failed to get current branch name: %v\n", repoDir, c.Config.RemoteName, repoUrl, targetUrl, err)
-			continue
-		}
-		lines = removeEmptyLines(lines)
-		if len(lines) != 1 {
-			return fmt.Errorf("expected only one line when checking current branch name: \n %s", strings.Join(lines, "\n"))
-		}
-		currentBranch := lines[0]
-		targetBranch := c.Config.BranchName
-
-		if currentBranch != targetBranch {
-			// create a new branch with the current changes
-			_, err = ExecuteQuietPathApplicationWithOutput(c.Ctx, repoDir, "git", "checkout", "-b", targetBranch)
-			if err != nil {
-				fmt.Printf("skipping git repo %s: with remote %s url: %s: target repo %s: failed to checkout branch %s: %v\n", repoDir, c.Config.RemoteName, repoUrl, targetUrl, targetBranch, err)
-				continue
-			}
-		} else {
-			fmt.Printf("git repo %s: with remote %s url: %s: target repo %s: already on target branch %s\n", repoDir, c.Config.RemoteName, repoUrl, targetUrl, targetBranch)
-		}
-
-		_, err = ExecuteQuietPathApplicationWithOutput(c.Ctx, repoDir, "git", "add", "--all")
-		if err != nil {
-			fmt.Printf("skipping git repo %s: with remote %s url: %s: target repo %s: failed to add changes: %v\n", repoDir, c.Config.RemoteName, repoUrl, targetUrl, err)
-			continue
-		}
-
-		// max commit subject length is 50 characters
-		// max body length is 75 characters
-		_, err = ExecuteQuietPathApplicationWithOutput(c.Ctx, repoDir, "git", "commit", "-m", strconv.Quote("chore: module migration"))
-		if err != nil {
-			fmt.Printf("skipping git repo %s: with remote %s url: %s: target repo %s: failed to commit changes: %v\n", repoDir, c.Config.RemoteName, repoUrl, targetUrl, err)
-			continue
-		}
-
-		pushLines, err := ExecuteQuietPathApplicationWithOutput(c.Ctx, repoDir, "git", "push", "--set-upstream", c.Config.RemoteName, targetBranch)
-		if err != nil {
-			fmt.Printf("failed to push updates of git repo %s with remote %s url %s to target repo %s: %v\n", repoDir, c.Config.RemoteName, repoUrl, targetUrl, err)
-			continue
-		}
-
-		prUrl, err := extractUrl(pushLines)
-		if err == nil {
-			pullRequestUrls = append(pullRequestUrls, prUrl)
-		}
-
-		fmt.Printf("Successfully migrated %s from %s to %s (%s)\n", repoDir, repoUrl, targetUrl, c.Config.RemoteName)
+		}(repoDir)
 	}
+	wg.Wait()
 
 	return nil
 }
@@ -377,15 +260,114 @@ func removeEmptyLines(lines []string) []string {
 	return filtered
 }
 
-var urlRegex = regexp.MustCompile(`https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)`)
+func branchName(ctx context.Context, workDir string) (branch string, err error) {
+	lines, err := ExecuteQuietPathApplicationWithOutput(ctx, workDir, "git", "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("skipping git repo %s: failed to get current branch name: %v", workDir, err)
+	}
+	lines = removeEmptyLines(lines)
+	if len(lines) != 1 {
+		return "", fmt.Errorf("expected only one line when checking current branch name: %s", strings.Join(lines, "\n"))
+	}
+	return lines[0], nil
+}
 
-func extractUrl(lines []string) (string, error) {
-	for _, line := range lines {
-		url := urlRegex.FindString(line)
-		if url != "" {
-			return url, nil
+func migrateRepo(ctx context.Context, gitUrlMap map[string]string, targetUrlMap map[string]bool, repoDir, remoteName string, targetBranch string, additionalFiles []string) error {
+	lines, err := ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "remote", "get-url", "--all", remoteName)
+	if err != nil {
+		return err
+	}
+	lines = removeEmptyLines(lines)
+	if len(lines) != 1 {
+		return fmt.Errorf("expected only one line: \n %s", strings.Join(lines, "\n"))
+	}
+
+	line := lines[0]
+	cmpUrl, err := giturls.Parse(line)
+	if err != nil {
+		return fmt.Errorf("invalid git url in repo: %s: url: %s", repoDir, line)
+	}
+	repoUrl := cmpUrl.String()
+
+	targetUrl, found := gitUrlMap[repoUrl]
+	if found {
+		// remove remote url
+		_, _ = ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "remote", "remove", remoteName)
+
+		// add remote url
+		_, err = ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "remote", "add", remoteName, targetUrl)
+		if err != nil {
+			return fmt.Errorf("skipping git repo %s: with remote %s url: %s: target repo %s: failed to set remote url: %w", repoDir, remoteName, repoUrl, targetUrl, err)
+		}
+
+		fmt.Printf("changed remote url of %s from %s to %s (%s)\n", repoDir, repoUrl, targetUrl, remoteName)
+	} else if targetUrlMap[repoUrl] {
+		// nothing todo, already target url
+		targetUrl = repoUrl
+		fmt.Printf("remote url of %s is already a target url %s (%s)\n", repoDir, targetUrl, remoteName)
+	} else {
+		return fmt.Errorf("skipping git repo %s: with remote %s url: %s: not found in csv file", repoDir, remoteName, repoUrl)
+	}
+
+	// check if target url exists
+	_, err = ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "ls-remote", targetUrl)
+	if err != nil {
+		return fmt.Errorf("skipping git repo %s: with remote %s url: %s: target repo %s does not exist: %w", repoDir, remoteName, repoUrl, targetUrl, err)
+	}
+
+	// check if there are changes according to git
+	_, _ = ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "update-index", "--refresh")
+
+	// returns rc = 1 if there are changes
+	_, err = ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "diff-index", "--quiet", "HEAD", "--")
+	if err == nil {
+		return fmt.Errorf("skipping git repo %s: with remote %s url: %s: target repo %s: no changes", repoDir, remoteName, repoUrl, targetUrl)
+	}
+
+	// rc != 0 => git found changes
+
+	currentBranch, err := branchName(ctx, repoDir)
+	if err != nil {
+		return err
+	}
+
+	if currentBranch != targetBranch {
+		// create a new branch with the current changes
+		_, err = ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "checkout", "-b", targetBranch)
+		if err != nil {
+			return fmt.Errorf("skipping git repo %s: with remote %s url: %s: target repo %s: failed to checkout branch %s: %w", repoDir, remoteName, repoUrl, targetUrl, targetBranch, err)
+		}
+	} else {
+		fmt.Printf("git repo %s: with remote %s url: %s: target repo %s: already on target branch %s\n", repoDir, remoteName, repoUrl, targetUrl, targetBranch)
+	}
+
+	_, err = ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "add", "--all")
+	if err != nil {
+		return fmt.Errorf("skipping git repo %s: with remote %s url: %s: target repo %s: failed to add changes: %w", repoDir, remoteName, repoUrl, targetUrl, err)
+	}
+
+	// max commit subject length is 50 characters
+	// max body length is 75 characters
+	_, err = ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "commit", "-m", "chore: module migration")
+	if err != nil {
+		return fmt.Errorf("skipping git repo %s: with remote %s url: %s: target repo %s: failed to commit changes: %w", repoDir, remoteName, repoUrl, targetUrl, err)
+	}
+
+	_, err = ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "push", "--set-upstream", remoteName, targetBranch)
+	if err != nil {
+		return fmt.Errorf("failed to push updates of git repo %s with remote %s url %s to target repo %s: %w", repoDir, remoteName, repoUrl, targetUrl, err)
+	}
+
+	if ghAvailable {
+		title := "migrated Go imports"
+		if len(additionalFiles) > 0 {
+			title += " and additional files"
+		}
+		_, err = ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "gh", "pr", "create", "--title", title, "--body", title)
+		if err != nil {
+			return fmt.Errorf("failed to create pr for %s: %w", repoDir, err)
 		}
 	}
 
-	return "", errors.New("url not found")
+	return nil
 }

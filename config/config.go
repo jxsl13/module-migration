@@ -3,6 +3,8 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -11,21 +13,22 @@ import (
 )
 
 type Config struct {
-	RemoteName string `koanf:"remote" short:"r" description:"name of the remote url"`
-	BranchName string `koanf:"branch" short:"b" description:"name of the branch that should be crated for the changes, if empty no branch migration will be executed with git"`
-	CSVPath    string `koanf:"csv" short:"c" description:"path to csv mapping file"`
-	Include    string `koanf:"include" short:"i" description:"';' separated list of include file paths matching regular expression"`
-	Exclude    string `koanf:"exclude" short:"e" description:"';' separated list of exclude file paths matching regular expression"`
-	Comma      string `koanf:"separator" short:"s" description:"column separator character in csv"`
-	OldColumn  string `koanf:"old" short:"o" description:"column name of index (starting with 0) containing the old [git] url"`
-	NewColumn  string `koanf:"new" short:"n" description:"column name of index (starting with 0) containing the new [git] url"`
+	AdditionalFiles string `koanf:"copy" description:"moves specified files or directories into your repository (; separated)"`
+	RemoteName      string `koanf:"remote" short:"r" description:"name of the remote url"`
+	BranchName      string `koanf:"branch" short:"b" description:"name of the branch that should be crated for the changes, if empty no branch migration will be executed with git"`
+	CSVPath         string `koanf:"csv" short:"c" description:"path to csv mapping file"`
+	Include         string `koanf:"include" short:"i" description:"';' separated list of include file paths matching regular expression"`
+	Exclude         string `koanf:"exclude" short:"e" description:"';' separated list of exclude file paths matching regular expression"`
+	Comma           string `koanf:"separator" short:"s" description:"column separator character in csv"`
+	OldColumn       string `koanf:"old" short:"o" description:"column name of index (starting with 0) containing the old [git] url"`
+	NewColumn       string `koanf:"new" short:"n" description:"column name of index (starting with 0) containing the new [git] url"`
 
-	comma   rune
-	include []*regexp.Regexp
-	exclude []*regexp.Regexp
-
-	oldIdx int
-	newIdx int
+	comma      rune
+	include    []*regexp.Regexp
+	exclude    []*regexp.Regexp
+	additional []string
+	oldIdx     int
+	newIdx     int
 }
 
 func (c *Config) CommaRune() rune {
@@ -38,6 +41,10 @@ func (c *Config) IncludeRegex() []*regexp.Regexp {
 
 func (c *Config) ExcludeRegex() []*regexp.Regexp {
 	return c.exclude
+}
+
+func (c *Config) Additional() []string {
+	return c.additional
 }
 
 func (c *Config) OldColumnIndex() int {
@@ -101,5 +108,28 @@ func (c *Config) Validate() error {
 	c.oldIdx = oldIdx
 	c.newIdx = newIdx
 
+	c.additional = strings.Split(c.AdditionalFiles, ";")
+
+	for _, filename := range c.additional {
+		_, found, err := exists(filename)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("file or directory not found: %s", filename)
+		}
+	}
+
 	return nil
+}
+
+func exists(filePath string) (os.FileInfo, bool, error) {
+	fi, err := os.Lstat(filePath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	return fi, true, nil
 }

@@ -8,8 +8,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"regexp"
 	"strings"
+	"unicode"
 )
 
 var (
@@ -29,7 +29,7 @@ type ErrExec struct {
 }
 
 func (e ErrExec) Error() string {
-	return fmt.Sprintf("application execution failed: '%s %s': rc %d: %s",
+	return fmt.Sprintf("application execution failed: %s %s: rc %d: %s",
 		e.Cmd,
 		strings.Join(e.Args, " "),
 		e.ExitCode,
@@ -39,7 +39,7 @@ func (e ErrExec) Error() string {
 
 // ExecuteQuietPathApplicationWithOutput executes a linux/windows command
 func ExecuteQuietPathApplicationWithOutput(ctx context.Context, workingDir, cmd string, args ...string) (lines []string, err error) {
-	available := isApplicationAvailable(ctx, cmd)
+	available := IsApplicationAvailable(ctx, cmd)
 	if !available {
 		return nil, fmt.Errorf("%w: %s", ErrApplicationNotFound, cmd)
 	}
@@ -78,26 +78,15 @@ func ExecuteQuietPathApplicationWithOutput(ctx context.Context, workingDir, cmd 
 	return lines, nil
 }
 
-var quotePattern = regexp.MustCompile(`[^\w@%+=:,./-]`)
+// StripUnsafe remove non-printable runes, e.g. control characters in
+// a string that is meant  for consumption by terminals that support
+// control characters.
+func StripUnsafe(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsPrint(r) {
+			return r
+		}
 
-// Quote returns a shell-escaped version of the string s. The returned value
-// is a string that can safely be used as one token in a shell command line.
-func ShellQuote(s string) string {
-	if len(s) == 0 {
-		return "''"
-	}
-
-	if quotePattern.MatchString(s) {
-		return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
-	}
-
-	return s
-}
-
-func ShellQuoteAll(ss ...string) []string {
-	result := make([]string, 0, len(ss))
-	for _, s := range ss {
-		result = append(result, ShellQuote(s))
-	}
-	return result
+		return -1
+	}, s)
 }
