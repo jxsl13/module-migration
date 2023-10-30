@@ -1,4 +1,4 @@
-package main
+package utils
 
 import (
 	"bytes"
@@ -45,7 +45,9 @@ func ExecuteQuietPathApplicationWithOutput(ctx context.Context, workingDir, cmd 
 	}
 
 	c := exec.CommandContext(ctx, cmd, args...)
-	c.Dir = workingDir
+	if workingDir != "" {
+		c.Dir = workingDir
+	}
 	c.Env = os.Environ()
 
 	// combined contains stdout and stderr but stderr only contains stderr output
@@ -54,7 +56,7 @@ func ExecuteQuietPathApplicationWithOutput(ctx context.Context, workingDir, cmd 
 
 	c.Stderr = io.MultiWriter(combinedOut, stderrBuf)
 	c.Stdout = combinedOut
-
+	fmt.Printf("Executing: %s\n", c.String())
 	err = c.Run()
 	if err != nil {
 
