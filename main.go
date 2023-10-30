@@ -365,6 +365,10 @@ func migrateRepo(ctx context.Context,
 			if e != nil {
 				return
 			}
+			_, e = ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "push", remoteName, "--delete", targetBranch)
+			if e != nil {
+				return
+			}
 		}
 	}()
 
