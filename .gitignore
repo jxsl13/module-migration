@@ -2,3 +2,6 @@
 module-migration
 .vscode/*
 tmp/*
+*.xlsx
+*.csv
+*.CSV
