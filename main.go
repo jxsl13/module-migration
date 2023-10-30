@@ -282,9 +282,9 @@ func migrateRepo(ctx context.Context,
 	additionalFiles []string,
 	exclude, include []*regexp.Regexp,
 	importReplacer *strings.Replacer,
-) error {
+) (err error) {
 
-	_, err := replace(repoDir, exclude, include, importReplacer)
+	_, err = replace(repoDir, exclude, include, importReplacer)
 	if err != nil {
 		return err
 	}
@@ -352,6 +352,21 @@ func migrateRepo(ctx context.Context,
 	} else {
 		fmt.Printf("git repo %s: with remote %s url: %s: target repo %s: already on target branch %s\n", repoDir, remoteName, repoUrl, targetUrl, targetBranch)
 	}
+	defer func() {
+		if currentBranch == targetBranch {
+			return
+		}
+		if err != nil {
+			_, e := ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "checkout", "-b", currentBranch)
+			if e != nil {
+				return
+			}
+			_, e = ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "branch", "-D", targetBranch)
+			if e != nil {
+				return
+			}
+		}
+	}()
 
 	_, err = ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "add", "--all")
 	if err != nil {
