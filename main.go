@@ -83,6 +83,7 @@ func (c *rootContext) PreRunE(cmd *cobra.Command) func(cmd *cobra.Command, args 
 		Exclude: strings.Join(
 			[]string{
 				`\.git` + sep + `.*`,
+				`go\.sum$`, // causes checksum mismatch
 			},
 			";",
 		),
@@ -286,6 +287,11 @@ func migrateRepo(ctx context.Context,
 	_, err := replace(repoDir, exclude, include, importReplacer)
 	if err != nil {
 		return err
+	}
+
+	_, err = ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "go", "mod", "tidy")
+	if err != nil {
+		return fmt.Errorf("go mod tidy failed: %w", err)
 	}
 
 	// do not continue if no branch is set
