@@ -50,6 +50,7 @@ type commitContext struct {
 func (c *commitContext) PreRunE(cmd *cobra.Command) func(cmd *cobra.Command, args []string) error {
 	c.Config = &CommitConfig{
 		RemoteName: "origin",
+		BranchName: "chore/module-migration",
 		CSVPath:    "./mapping.csv",
 		Comma:      ";", // default separator
 		OldColumn:  "0",

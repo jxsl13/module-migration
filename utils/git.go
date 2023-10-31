@@ -28,6 +28,7 @@ func FindGitDirs(rootPath string) ([]string, error) {
 		// collect git dirs
 		if gitDirMatcher.MatchString(path) && info.IsDir() {
 			gitFolders[path] = true
+			return filepath.SkipDir
 		}
 		return nil
 	})
@@ -47,6 +48,33 @@ func FindRepoDirs(rootPath string) ([]string, error) {
 		ss[idx] = filepath.Dir(s)
 	}
 	return ss, nil
+}
+
+// FindGoRepoDirs returns the parent directories of all found Go repo directories which are also git directories.
+func FindGoRepoDirs(rootPath string) ([]string, error) {
+	repos, err := FindRepoDirs(rootPath)
+	if err != nil {
+		return nil, err
+	}
+
+	goRepos := make([]string, 0, len(repos))
+	for _, repo := range repos {
+		fi, found, err := Exists(filepath.Join(repo, "go.mod"))
+		if err != nil {
+			return nil, err
+		}
+
+		if !found {
+			continue
+		}
+
+		if fi.IsDir() {
+			continue
+		}
+
+		goRepos = append(goRepos, repo)
+	}
+	return goRepos, nil
 }
 
 func GitRemoteUrl(ctx context.Context, repoDir, remoteName string) (url string, err error) {

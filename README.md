@@ -2,6 +2,11 @@
 
 Search and replace ustility to migrate Go modules from one location to another location.
 
+## Requirements:
+ - git client with access to the source and target repos
+ - gh client for creating github pull requests
+ - go toolchain for dependency management and build checks
+
 ## Installation
 
 ```shell

@@ -5,38 +5,16 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
-
-	"github.com/jxsl13/cwalk"
 )
 
 func ReplaceInDir(rootPath string, exclude, include []*regexp.Regexp, replacer *strings.Replacer) ([]string, error) {
 	touchedFiles := make([]string, 0, 512)
-	err := cwalk.Walk(rootPath, func(path string, info fs.FileInfo, err error) error {
-		if err != nil {
-			return fmt.Errorf("%w: %s", err, path)
-		}
-		for _, re := range exclude {
-			if re.MatchString(path) {
-				if info.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-		}
-
-		keep := false
-		for _, re := range include {
-			if re.MatchString(path) {
-				keep = true
-				break
-			}
-		}
-		if !keep {
-			return nil
+	err := WalkMatching(rootPath, exclude, include, func(path string, info fs.FileInfo, e error) error {
+		if e != nil {
+			return fmt.Errorf("%s: %w", path, e)
 		}
 
 		f, err := os.OpenFile(path, os.O_RDWR, 0)
@@ -80,5 +58,3 @@ func sortedKeys[V any](m map[string]V) []string {
 	sort.Strings(result)
 	return result
 }
-
-

@@ -15,6 +15,7 @@ import (
 	"github.com/jxsl13/module-migration/defaults"
 	"github.com/jxsl13/module-migration/utils"
 	"github.com/spf13/cobra"
+	"golang.org/x/mod/modfile"
 )
 
 func NewMigrateCmd() *cobra.Command {
@@ -52,6 +53,7 @@ type migrateContext struct {
 func (c *migrateContext) PreRunE(cmd *cobra.Command) func(cmd *cobra.Command, args []string) error {
 	c.Config = &MigrateConfig{
 		RemoteName: "origin",
+		BranchName: "chore/module-migration",
 		CSVPath:    "./mapping.csv",
 		Comma:      ";", // default separator
 		OldColumn:  "0",
@@ -75,7 +77,7 @@ func (c *migrateContext) PreRunE(cmd *cobra.Command) func(cmd *cobra.Command, ar
 
 func (c *migrateContext) RunE(cmd *cobra.Command, args []string) (err error) {
 
-	gitUrlMap, moduleMap, err := csv.NewReplacerFromCSV(
+	_, moduleMap, err := csv.NewReplacerFromCSV(
 		c.Config.CSVPath,
 		c.Config.OldColumnIndex(),
 		c.Config.NewColumnIndex(),
@@ -87,12 +89,7 @@ func (c *migrateContext) RunE(cmd *cobra.Command, args []string) (err error) {
 
 	importReplacer := utils.NewReplacer(moduleMap)
 
-	targetUrlMap := make(map[string]bool, len(gitUrlMap))
-	for _, v := range gitUrlMap {
-		targetUrlMap[v] = true
-	}
-
-	repoDirs, err := utils.FindRepoDirs(c.RootPath)
+	repoDirs, err := utils.FindGoRepoDirs(c.RootPath)
 	if err != nil {
 		return fmt.Errorf("failed to find git folders: %w", err)
 	}
@@ -104,14 +101,13 @@ func (c *migrateContext) RunE(cmd *cobra.Command, args []string) (err error) {
 			defer wg.Done()
 			err := migrateRepo(
 				c.Ctx,
-				gitUrlMap,
-				targetUrlMap,
 				repoDir,
 				c.Config.RemoteName,
 				c.Config.BranchName,
 				c.Config.Additional(),
 				c.Config.ExcludeRegex(),
 				c.Config.IncludeRegex(),
+				moduleMap,
 				importReplacer,
 			)
 			if err != nil {
@@ -127,18 +123,27 @@ func (c *migrateContext) RunE(cmd *cobra.Command, args []string) (err error) {
 }
 
 func migrateRepo(ctx context.Context,
-	gitUrlMap map[string]string,
-	targetUrlMap map[string]bool,
 	repoDir,
 	remoteName string,
 	targetBranch string,
 	additionalFiles []string,
 	exclude, include []*regexp.Regexp,
+	moduleMap map[string]string,
 	importReplacer *strings.Replacer,
 ) (err error) {
 
 	// pull before changing anything
 	_ = utils.GitPull(ctx, repoDir)
+	goMod := filepath.Join(repoDir, "go.mod")
+
+	err = migrateGoMod(ctx, goMod, moduleMap)
+	if err != nil {
+		return fmt.Errorf("failed to migrate ")
+	}
+
+	goModRe := regexp.MustCompile(goMod + "$")
+	goSumRe := regexp.MustCompile(filepath.Join(repoDir, "go.sum") + "$")
+	exclude = append(exclude, goModRe, goSumRe)
 
 	_, err = utils.ReplaceInDir(repoDir, exclude, include, importReplacer)
 	if err != nil {
@@ -152,7 +157,52 @@ func migrateRepo(ctx context.Context,
 		}
 	}
 
+	// fix go.sum file
 	err = utils.GoModTidy(ctx, repoDir)
+	if err != nil {
+		return err
+	}
+
+	return utils.GoBuildAll(ctx, repoDir)
+}
+
+func migrateGoMod(ctx context.Context, goModFilePath string, moduleMap map[string]string) error {
+	data, err := os.ReadFile(goModFilePath)
+	if err != nil {
+		return err
+	}
+
+	f, err := modfile.Parse(goModFilePath, data, nil)
+	if err != nil {
+		return fmt.Errorf("failed to read go mod file: %w", err)
+	}
+
+	for _, req := range f.Require {
+		if req.Indirect {
+			continue
+		}
+
+		targetModulePath, found := moduleMap[req.Mod.Path]
+		if !found {
+			continue
+		}
+
+		// bump patch version
+		v, err := utils.NewUpdatedVersion(req.Mod.Version, false, false, true)
+		if err != nil {
+			return fmt.Errorf("failed to migrate module dependency of %s: %s: %w", goModFilePath, req.Mod.String(), err)
+		}
+
+		req.Mod.Path = targetModulePath
+		req.Mod.Version = v.Original()
+	}
+
+	data, err = f.Format()
+	if err != nil {
+		return fmt.Errorf("failed to format %s: %w", goModFilePath, err)
+	}
+
+	err = os.WriteFile(goModFilePath, data, 0) // already exists, no permissions needed
 	if err != nil {
 		return err
 	}

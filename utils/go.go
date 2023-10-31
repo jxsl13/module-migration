@@ -12,3 +12,11 @@ func GoModTidy(ctx context.Context, repoDir string) error {
 	}
 	return nil
 }
+
+func GoBuildAll(ctx context.Context, repoDir string) error {
+	_, err := ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "go", "build", "./...")
+	if err != nil {
+		return fmt.Errorf("go build ./... failed for repo %s: %w", repoDir, err)
+	}
+	return nil
+}
