@@ -167,6 +167,7 @@ func migrateRepo(ctx context.Context,
 }
 
 func migrateGoMod(ctx context.Context, goModFilePath string, moduleMap map[string]string) error {
+	fmt.Printf("Executing: Migration of %s\n", goModFilePath)
 	data, err := os.ReadFile(goModFilePath)
 	if err != nil {
 		return err
@@ -178,10 +179,6 @@ func migrateGoMod(ctx context.Context, goModFilePath string, moduleMap map[strin
 	}
 
 	for _, req := range f.Require {
-		if req.Indirect {
-			continue
-		}
-
 		targetModulePath, found := moduleMap[req.Mod.Path]
 		if !found {
 			continue
@@ -192,9 +189,12 @@ func migrateGoMod(ctx context.Context, goModFilePath string, moduleMap map[strin
 		if err != nil {
 			return fmt.Errorf("failed to migrate module dependency of %s: %s: %w", goModFilePath, req.Mod.String(), err)
 		}
-
+		before := req.Mod.String()
 		req.Mod.Path = targetModulePath
 		req.Mod.Version = v.Original()
+		after := req.Mod.String()
+
+		fmt.Printf("Replacing: %s -> %s\n", before, after)
 	}
 
 	data, err = f.Format()
