@@ -2,12 +2,15 @@ package utils
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/jxsl13/cwalk"
 	giturls "github.com/whilp/git-urls"
 )
@@ -64,7 +67,7 @@ func GitRemoteUrl(ctx context.Context, repoDir, remoteName string) (url string, 
 	return cmpUrl.String(), nil
 }
 
-func GitBranchName(ctx context.Context, workDir string) (branch string, err error) {
+func GitGetBranchName(ctx context.Context, workDir string) (branch string, err error) {
 	lines, err := ExecuteQuietPathApplicationWithOutput(ctx, workDir, "git", "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return "", fmt.Errorf("skipping git repo %s: failed to get current branch name: %v", workDir, err)
@@ -74,30 +77,6 @@ func GitBranchName(ctx context.Context, workDir string) (branch string, err erro
 		return "", fmt.Errorf("expected only one line when checking current branch name: %s", strings.Join(lines, "\n"))
 	}
 	return lines[0], nil
-}
-
-func removeEmptyLines(lines []string) []string {
-	cnt := 0
-	for _, line := range lines {
-		if line == "" {
-			cnt++
-		}
-	}
-	if cnt == 0 {
-		return lines
-	}
-	filtered := make([]string, 0, len(lines)-cnt)
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-		l := strings.TrimSpace(line)
-		if l == "" {
-			continue
-		}
-		filtered = append(filtered, l)
-	}
-	return filtered
 }
 
 func GitChangeRemoteUrl(ctx context.Context, repoDir, remoteName, targetUrl string) error {
@@ -202,4 +181,162 @@ func GitPushUpstream(ctx context.Context, repoDir string, remoteName, targetBran
 		return fmt.Errorf("failed to push to upstream (%s) branch %s in %s: %w", remoteName, targetBranch, repoDir, err)
 	}
 	return nil
+}
+
+func GitGetDefaultBranch(ctx context.Context, repoDir, remoteName string) (branchName string, err error) {
+	// remoteName is usually origin
+	lines, err := ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "rev-parse", "--abbrev-ref", fmt.Sprintf("%s/HEAD", remoteName))
+	if err != nil {
+		return "", fmt.Errorf("failed to get default branch in %s: %w", repoDir, err)
+	}
+
+	lines = removeEmptyLines(lines)
+	if len(lines) == 0 {
+		return "", fmt.Errorf("failed to get default branch in %s: no output from command", repoDir)
+	}
+
+	return lines[0], nil
+}
+
+func GitGetLatestTag(ctx context.Context, repoDir string) (version semver.Version, err error) {
+	lines, err := ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "--tag")
+	if err != nil {
+		return version, fmt.Errorf("failed to get latest tag in %s: %w", repoDir, err)
+	}
+
+	lines = removeEmptyLines(lines)
+	if len(lines) == 0 {
+		return version, fmt.Errorf("failed to get latest tag in %s: no version tags found", repoDir)
+	}
+
+	vs := toSortedSemverList(lines)
+	if len(vs) == 0 {
+		return version, fmt.Errorf("failed to get latest tag in %s: no valid version tags found: %v", repoDir, lines)
+	}
+
+	latest := vs[len(vs)-1]
+	return *latest, nil
+}
+
+func toSortedSemverList(lines []string) []*semver.Version {
+	vs := make([]*semver.Version, 0, len(lines))
+	for _, l := range lines {
+		v, err := semver.NewVersion(strings.TrimSpace(l))
+		if err != nil {
+			continue
+		}
+
+		vs = append(vs, v)
+	}
+	sort.Sort(semver.Collection(vs))
+	return vs
+}
+
+func GitCreateTag(ctx context.Context, repoDir, tagName string, description ...string) (err error) {
+
+	if len(description) > 0 {
+		_, err = ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "tag", "-a", description[0])
+	} else {
+		_, err = ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "tag")
+	}
+	if err != nil {
+		return fmt.Errorf("failed to create tag %q in %s: %w", tagName, repoDir, err)
+	}
+	return nil
+}
+
+func GitPushTags(ctx context.Context, repoDir, remoteName string) (err error) {
+	_, err = ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "push", remoteName, "--tags")
+	if err != nil {
+		return fmt.Errorf("failed to push git tags to %s in %s: %w", remoteName, repoDir, err)
+	}
+	return nil
+}
+
+// Creates a new local version tag BUT does NOT push it.
+// Use GitPushTags(ctx, repoDir, remoteName) to also push the tag to the origin
+func GitBumpVersionTag(ctx context.Context, repoDir, remoteName string, major, minor, patch bool) (err error) {
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("failed to bump release tag in %s: %w", repoDir, err)
+		}
+	}()
+
+	currentBranch, err := GitGetBranchName(ctx, repoDir)
+	if err != nil {
+		return err
+	}
+
+	mainBranch, err := GitGetDefaultBranch(ctx, repoDir, remoteName)
+	if err != nil {
+		return
+	}
+
+	err = GitCheckoutBranch(ctx, repoDir, mainBranch)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		// revert back to previous branch
+		if err != nil {
+			e := GitCheckoutBranch(ctx, repoDir, currentBranch)
+			if e != nil {
+				err = errors.Join(err, e)
+			}
+		}
+	}()
+
+	// pull potential changes
+	err = GitPull(ctx, repoDir)
+	if err != nil {
+		return err
+	}
+
+	v, err := GitGetLatestTag(ctx, repoDir)
+	if err != nil {
+		return err
+	}
+
+	if major {
+		v = v.IncMajor()
+	}
+	if minor {
+		v = v.IncMinor()
+	}
+	if patch {
+		v = v.IncPatch()
+	}
+
+	// same prefix and suffix as the latest tag
+	newReleaseTag := v.Original()
+
+	err = GitCreateTag(ctx, repoDir, newReleaseTag, "module migration")
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func removeEmptyLines(lines []string) []string {
+	cnt := 0
+	for _, line := range lines {
+		if line == "" {
+			cnt++
+		}
+	}
+	if cnt == 0 {
+		return lines
+	}
+	filtered := make([]string, 0, len(lines)-cnt)
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		l := strings.TrimSpace(line)
+		if l == "" {
+			continue
+		}
+		filtered = append(filtered, l)
+	}
+	return filtered
 }

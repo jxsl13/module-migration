@@ -67,7 +67,7 @@ type Validatable interface {
 func RegisterFlags[T any](config *T, persistent bool, app *cobra.Command, options ...ParseOption) func() error {
 
 	op := parseOption{
-		envPrefix:      "DIFF_",
+		envPrefix:      "MM_",
 		delimiter:      ".",
 		tag:            "koanf",
 		flatStruct:     true,

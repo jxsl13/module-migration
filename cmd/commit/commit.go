@@ -143,7 +143,7 @@ func commit(ctx context.Context,
 		return fmt.Errorf("failed to refresh git repo index: %w", err)
 	}
 
-	currentBranch, err := utils.GitBranchName(ctx, repoDir)
+	currentBranch, err := utils.GitGetBranchName(ctx, repoDir)
 	if err != nil {
 		return err
 	}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/jxsl13/module-migration/cmd/commit"
 	"github.com/jxsl13/module-migration/cmd/migrate"
+	"github.com/jxsl13/module-migration/cmd/release"
 	"github.com/spf13/cobra"
 )
 
@@ -40,7 +41,7 @@ func NewRootCmd() *cobra.Command {
 	rootCmd.AddCommand(NewCompletionCmd(rootCmd.Name()))
 	rootCmd.AddCommand(migrate.NewMigrateCmd())
 	rootCmd.AddCommand(commit.NewCommitCmd())
-
+	rootCmd.AddCommand(release.NewReleaseCmd())
 	return rootCmd
 }
 

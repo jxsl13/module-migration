@@ -30,7 +30,7 @@ func Header(filePath string, commaRune rune) ([]string, error) {
 }
 
 // returns source and target urls as map
-func NewReplacerFromCSV(filePath string, oldColumn, newColumn int, commaRune rune) (map[string]string, *strings.Replacer, error) {
+func NewReplacerFromCSV(filePath string, oldColumn, newColumn int, commaRune rune) (gitUrlMap, moduleMap map[string]string, err error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, nil, err
@@ -45,8 +45,8 @@ func NewReplacerFromCSV(filePath string, oldColumn, newColumn int, commaRune run
 	r := csv.NewReader(f)
 	r.Comma = commaRune
 	r.ReuseRecord = true
-	replacer := make([]string, 0, 512)
-	m := make(map[string]string, 512)
+	gitUrlMap = make(map[string]string, 512)
+	moduleMap = make(map[string]string, 512)
 	row := 0
 	for {
 		record, err := r.Read()
@@ -86,7 +86,7 @@ func NewReplacerFromCSV(filePath string, oldColumn, newColumn int, commaRune run
 		gitUrlOld := strings.TrimLeft(o.String(), "/")
 		gitUrlNew := strings.TrimLeft(n.String(), "/")
 
-		m[gitUrlOld] = gitUrlNew
+		gitUrlMap[gitUrlOld] = gitUrlNew
 
 		// remove scheme only for import mapping
 		o.Scheme = ""
@@ -96,9 +96,8 @@ func NewReplacerFromCSV(filePath string, oldColumn, newColumn int, commaRune run
 
 		oldModuleUrl := strings.TrimSuffix(strings.TrimLeft(o.String(), "/"), ".git")
 		newModuleUrl := strings.TrimSuffix(strings.TrimLeft(n.String(), "/"), ".git")
-
-		replacer = append(replacer, oldModuleUrl, newModuleUrl)
+		moduleMap[oldModuleUrl] = newModuleUrl
 		row++
 	}
-	return m, strings.NewReplacer(replacer...), nil
+	return gitUrlMap, moduleMap, nil
 }

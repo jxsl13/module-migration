@@ -75,7 +75,7 @@ func (c *migrateContext) PreRunE(cmd *cobra.Command) func(cmd *cobra.Command, ar
 
 func (c *migrateContext) RunE(cmd *cobra.Command, args []string) (err error) {
 
-	gitUrlMap, importReplacer, err := csv.NewReplacerFromCSV(
+	gitUrlMap, moduleMap, err := csv.NewReplacerFromCSV(
 		c.Config.CSVPath,
 		c.Config.OldColumnIndex(),
 		c.Config.NewColumnIndex(),
@@ -84,6 +84,8 @@ func (c *migrateContext) RunE(cmd *cobra.Command, args []string) (err error) {
 	if err != nil {
 		return err
 	}
+
+	importReplacer := utils.NewReplacer(moduleMap)
 
 	targetUrlMap := make(map[string]bool, len(gitUrlMap))
 	for _, v := range gitUrlMap {
