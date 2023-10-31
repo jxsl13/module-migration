@@ -67,16 +67,21 @@ func GitRemoteUrl(ctx context.Context, repoDir, remoteName string) (url string, 
 	return cmpUrl.String(), nil
 }
 
-func GitGetBranchName(ctx context.Context, workDir string) (branch string, err error) {
-	lines, err := ExecuteQuietPathApplicationWithOutput(ctx, workDir, "git", "rev-parse", "--abbrev-ref", "HEAD")
+func GitGetBranchName(ctx context.Context, repoDir string) (branch string, err error) {
+	lines, err := ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
-		return "", fmt.Errorf("skipping git repo %s: failed to get current branch name: %v", workDir, err)
+		return "", fmt.Errorf("skipping git repo %s: failed to get current branch name: %v", repoDir, err)
 	}
 	lines = removeEmptyLines(lines)
 	if len(lines) != 1 {
 		return "", fmt.Errorf("expected only one line when checking current branch name: %s", strings.Join(lines, "\n"))
 	}
 	return lines[0], nil
+}
+
+func GitExistsBranch(ctx context.Context, repoDir, branchName string) bool {
+	_, err := ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "rev-parse", "--verify", branchName)
+	return err == nil
 }
 
 func GitChangeRemoteUrl(ctx context.Context, repoDir, remoteName, targetUrl string) error {
@@ -109,18 +114,49 @@ func GitRefreshIndex(ctx context.Context, repoDir string) error {
 }
 
 func GitPull(ctx context.Context, repoDir string) error {
-	_, err := ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "pull")
+	_, err := ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "pull", "--all", "--tags")
 	if err != nil {
 		return fmt.Errorf("git pull failed in %s: %w", repoDir, err)
 	}
 	return nil
 }
 
-func GitCheckoutNewBranch(ctx context.Context, repoDir string, targetBranch string) error {
-	// create a new branch with the current changes
-	_, err := ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "checkout", "-b", targetBranch)
+func GitFetchPrune(ctx context.Context, repoDir string) error {
+	_, err := ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "fetch", "--all", "--tags", "--prune", "--prune-tags", "--force")
 	if err != nil {
-		return fmt.Errorf("failed to checkout new branch %s in %s: %w", targetBranch, repoDir, err)
+		return fmt.Errorf("git pull failed in %s: %w", repoDir, err)
+	}
+	return nil
+}
+
+// GitPullPrune removes everything that does not exist in the remote repo
+func GitPullPrune(ctx context.Context, repoDir string) error {
+	_, err := ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "pull", "--all", "--tags", "--prune", "--prune-tags", "--force")
+	if err != nil {
+		return fmt.Errorf("git pull failed in %s: %w", repoDir, err)
+	}
+	return nil
+}
+
+func GitCheckoutNewBranch(ctx context.Context, repoDir string, targetBranch string) (err error) {
+	// create a new branch with the current changes
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("failed to checkout new branch %s in %s: %w", targetBranch, repoDir, err)
+		}
+	}()
+
+	if GitExistsBranch(ctx, repoDir, targetBranch) {
+		// delete previous branch if one already exists
+		err := GitDeleteBranch(ctx, repoDir, targetBranch)
+		if err != nil {
+			return err
+		}
+	}
+
+	_, err = ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "checkout", "-b", targetBranch)
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -195,11 +231,12 @@ func GitGetDefaultBranch(ctx context.Context, repoDir, remoteName string) (branc
 		return "", fmt.Errorf("failed to get default branch in %s: no output from command", repoDir)
 	}
 
-	return lines[0], nil
+	branchName = strings.TrimPrefix(lines[0], fmt.Sprintf("%s/", remoteName))
+	return branchName, nil
 }
 
 func GitGetLatestTag(ctx context.Context, repoDir string) (version semver.Version, err error) {
-	lines, err := ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "--tag")
+	lines, err := ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "tag")
 	if err != nil {
 		return version, fmt.Errorf("failed to get latest tag in %s: %w", repoDir, err)
 	}
@@ -232,13 +269,8 @@ func toSortedSemverList(lines []string) []*semver.Version {
 	return vs
 }
 
-func GitCreateTag(ctx context.Context, repoDir, tagName string, description ...string) (err error) {
-
-	if len(description) > 0 {
-		_, err = ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "tag", "-a", description[0])
-	} else {
-		_, err = ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "tag")
-	}
+func GitCreateTag(ctx context.Context, repoDir, tagName string) (err error) {
+	_, err = ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "tag", tagName)
 	if err != nil {
 		return fmt.Errorf("failed to create tag %q in %s: %w", tagName, repoDir, err)
 	}
@@ -286,11 +318,9 @@ func GitBumpVersionTag(ctx context.Context, repoDir, remoteName string, major, m
 		}
 	}()
 
-	// pull potential changes
-	err = GitPull(ctx, repoDir)
-	if err != nil {
-		return err
-	}
+	// pull potential changes and overwrite local tags
+	_ = GitFetchPrune(ctx, repoDir)
+	_ = GitPullPrune(ctx, repoDir)
 
 	v, err := GitGetLatestTag(ctx, repoDir)
 	if err != nil {
@@ -310,7 +340,7 @@ func GitBumpVersionTag(ctx context.Context, repoDir, remoteName string, major, m
 	// same prefix and suffix as the latest tag
 	newReleaseTag := v.Original()
 
-	err = GitCreateTag(ctx, repoDir, newReleaseTag, "module migration")
+	err = GitCreateTag(ctx, repoDir, newReleaseTag)
 	if err != nil {
 		return err
 	}
