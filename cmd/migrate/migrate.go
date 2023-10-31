@@ -136,9 +136,9 @@ func migrateRepo(ctx context.Context,
 	_ = utils.GitPull(ctx, repoDir)
 	goMod := filepath.Join(repoDir, "go.mod")
 
-	err = migrateGoMod(ctx, goMod, moduleMap)
+	err = migrateGoMod(ctx, repoDir, goMod, moduleMap)
 	if err != nil {
-		return fmt.Errorf("failed to migrate ")
+		return fmt.Errorf("failed to migrate go mod: %s: %w", goMod, err)
 	}
 
 	goModRe := regexp.MustCompile(goMod + "$")
@@ -166,45 +166,64 @@ func migrateRepo(ctx context.Context,
 	return utils.GoBuildAll(ctx, repoDir)
 }
 
-func migrateGoMod(ctx context.Context, goModFilePath string, moduleMap map[string]string) error {
-	fmt.Printf("Executing: Migration of %s\n", goModFilePath)
+func migrateGoMod(ctx context.Context, repoDir, goModFilePath string, moduleMap map[string]string) error {
+
 	data, err := os.ReadFile(goModFilePath)
 	if err != nil {
 		return err
 	}
 
-	f, err := modfile.Parse(goModFilePath, data, nil)
+	modFile, err := modfile.Parse(goModFilePath, data, nil)
 	if err != nil {
 		return fmt.Errorf("failed to read go mod file: %w", err)
 	}
 
-	for _, req := range f.Require {
+	// map module name
+	moduleName := modFile.Module.Mod.Path
+	if targetModuleName, found := moduleMap[moduleName]; found {
+		fmt.Printf("Module: mapping found: %s -> %s\n", moduleName, targetModuleName)
+		modFile.AddModuleStmt(targetModuleName)
+	} else {
+		fmt.Printf("Module: nothing to change for %s\n", moduleName)
+	}
+
+	// map dependencies
+	foundDependencies := make([]string, 0, 1)
+	for _, req := range modFile.Require {
 		targetModulePath, found := moduleMap[req.Mod.Path]
 		if !found {
+			fmt.Printf("Dependency: nothing to do: %s\n", req.Mod.Path)
 			continue
 		}
 
-		// bump patch version
-		v, err := utils.NewUpdatedVersion(req.Mod.Version, false, false, true)
+		err = modFile.DropRequire(req.Mod.Path)
 		if err != nil {
-			return fmt.Errorf("failed to migrate module dependency of %s: %s: %w", goModFilePath, req.Mod.String(), err)
+			return fmt.Errorf("failed to drop old dependency: %s: %w", req.Mod.Path, err)
 		}
-		before := req.Mod.String()
-		req.Mod.Path = targetModulePath
-		req.Mod.Version = v.Original()
-		after := req.Mod.String()
 
-		fmt.Printf("Replacing: %s -> %s\n", before, after)
+		fmt.Printf("Found dependency mapping: %s -> %s\n", req.Mod.Path, targetModulePath)
+		foundDependencies = append(foundDependencies, targetModulePath)
 	}
 
-	data, err = f.Format()
+	modFile.Cleanup()
+
+	data, err = modFile.Format()
 	if err != nil {
 		return fmt.Errorf("failed to format %s: %w", goModFilePath, err)
 	}
 
-	err = os.WriteFile(goModFilePath, data, 0) // already exists, no permissions needed
+	err = os.WriteFile(goModFilePath, data, 0666)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to write to %s: %w", goModFilePath, err)
 	}
+
+	for _, dep := range foundDependencies {
+		fmt.Printf("Dependency: updating: %s\n", dep)
+		err = utils.GoGet(ctx, repoDir, fmt.Sprintf("%s@latest", dep))
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }

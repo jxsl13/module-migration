@@ -29,6 +29,10 @@ type ErrExec struct {
 }
 
 func (e ErrExec) Error() string {
+	out := e.Output
+	if len(e.ErrOutput) > len(out) {
+		out = e.ErrOutput
+	}
 	return fmt.Sprintf("application execution failed: %s %s: rc %d: %s",
 		e.Cmd,
 		strings.Join(e.Args, " "),

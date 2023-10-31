@@ -20,3 +20,11 @@ func GoBuildAll(ctx context.Context, repoDir string) error {
 	}
 	return nil
 }
+
+func GoGet(ctx context.Context, repoDir string, dependency string) error {
+	_, err := ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "go", "get", dependency)
+	if err != nil {
+		return fmt.Errorf("go get %s failed for repo %s: %w", repoDir, dependency, err)
+	}
+	return nil
+}
