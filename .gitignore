@@ -5,3 +5,4 @@ tmp/*
 *.xlsx
 *.csv
 *.CSV
+tmp*/*
