@@ -17,8 +17,6 @@ type CommitConfig struct {
 	RemoteName string `koanf:"remote" short:"r" description:"name of the remote url"`
 	BranchName string `koanf:"branch" short:"b" description:"name of the branch that should be crated for the changes, if empty no branch migration will be executed with git"`
 
-	BumpTag bool `koanf:"bump.tag" short:"t" description:"bump latest tag and increase its version by one on the patch level (1.1.5 -> 1.1.6)"`
-
 	comma rune
 
 	oldIdx int

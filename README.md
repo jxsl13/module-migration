@@ -77,14 +77,12 @@ $ module-migration commit --help
   MM_NEW          column name or index (starting with 0) containing the new [git] url (default: "1")
   MM_REMOTE       name of the remote url (default: "origin")
   MM_BRANCH       name of the branch that should be crated for the changes, if empty no branch migration will be executed with git (default: "chore/module-migration")
-  MM_BUMP_TAG     bump latest tag and increase its version by one on the patch level (1.1.5 -> 1.1.6) (default: "false")
 
 Usage:
   module-migration commit [flags]
 
 Flags:
   -b, --branch string      name of the branch that should be crated for the changes, if empty no branch migration will be executed with git (default "chore/module-migration")
-  -t, --bump-tag           bump latest tag and increase its version by one on the patch level (1.1.5 -> 1.1.6)
   -c, --csv string         path to csv mapping file (default "./mapping.csv")
   -h, --help               help for commit
   -n, --new string         column name or index (starting with 0) containing the new [git] url (default "1")
