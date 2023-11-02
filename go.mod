@@ -4,7 +4,6 @@ go 1.21.1
 
 require (
 	github.com/Masterminds/semver/v3 v3.2.1
-	github.com/jxsl13/cwalk v1.1.0
 	github.com/knadh/koanf/maps v0.1.1
 	github.com/knadh/koanf/parsers/dotenv v0.1.0
 	github.com/knadh/koanf/providers/confmap v0.1.0

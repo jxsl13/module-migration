@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
-	"github.com/jxsl13/cwalk"
 	giturls "github.com/whilp/git-urls"
 )
 
@@ -20,7 +19,7 @@ var gitDirMatcher = regexp.MustCompile(Separator + `\.git$`)
 func FindGitDirs(rootPath string) ([]string, error) {
 	gitFolders := make(map[string]bool, 512)
 
-	err := cwalk.Walk(rootPath, func(path string, info fs.FileInfo, err error) error {
+	err := filepath.Walk(rootPath, func(path string, info fs.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
