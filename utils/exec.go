@@ -37,7 +37,7 @@ func (e ErrExec) Error() string {
 		e.Cmd,
 		strings.Join(e.Args, " "),
 		e.ExitCode,
-		e.Output,
+		out,
 	)
 }
 
