@@ -23,12 +23,88 @@ ssh://git@git.company.com/project/repo.git;git@github.com:company/new-repo.git
 ```
 
 ```shell
-module-migration ./ --csv mapping.csv --separator ';' --old 'Repo-clone-url' --new 'Target-Clone-Url'
+export MM_CSV="/home/user/Desktop/module-migration/replace.csv"
+# also possible to use index based column definitions
+export MM_OLD="Repo-clone-url"
+export MM_NEW=" Target-Clone-Url"
+# Excel exports with ; as separator ba default, that's why that is the default
+export MM_SEPARATOR=";"
+# folder to copy
+export MM_COPY="/home/user/GitHubMigration/.github"
 
-# or by column index
+module-migration migrate ./
+module-migration commit ./
+module-migration release ./ --push
+```
 
-module-migration ./ --csv mapping.csv --separator ';' --old 0 --new 1
+## module-migration migrate
+```shell
+$ module-migration migrate --help
 
+  MM_CSV          path to csv mapping file (default: "./mapping.csv")
+  MM_SEPARATOR    column separator character in csv (default: ";")
+  MM_OLD          column name or index (starting with 0) containing the old [git] url (default: "0")
+  MM_NEW          column name or index (starting with 0) containing the new [git] url (default: "1")
+  MM_REMOTE       name of the remote url (default: "origin")
+  MM_BRANCH       name of the branch that should be crated for the changes, if empty no branch migration will be executed with git (default: "chore/module-migration")
+  MM_INCLUDE      ',' separated list of include file paths matching regular expression (default: "\\.go$,Dockerfile$,Jenkinsfile$,\\.yaml$,\\.yml$,\\.md$,\\.MD$")
+  MM_EXCLUDE      ',' separated list of exclude file paths matching regular expression (default: "\\.git$")
+  MM_COPY         moves specified files or directories into your repository (, separated)
 
-module-migration /home/user/sourceDir --csv /home/user/Desktop/module-migration/replace.csv --old Repo-clone-url --new Target-Clone-Url --separator ";" --branch chore/migrate-imports --copy /home/user/GitHubMigration/.github
+Usage:
+  module-migration migrate [flags]
+
+Flags:
+  -b, --branch string      name of the branch that should be crated for the changes, if empty no branch migration will be executed with git (default "chore/module-migration")
+      --copy string        moves specified files or directories into your repository (, separated)
+  -c, --csv string         path to csv mapping file (default "./mapping.csv")
+  -e, --exclude string     ',' separated list of exclude file paths matching regular expression (default "\\.git$")
+  -h, --help               help for migrate
+  -i, --include string     ',' separated list of include file paths matching regular expression (default "\\.go$,Dockerfile$,Jenkinsfile$,\\.yaml$,\\.yml$,\\.md$,\\.MD$")
+  -n, --new string         column name or index (starting with 0) containing the new [git] url (default "1")
+  -o, --old string         column name or index (starting with 0) containing the old [git] url (default "0")
+  -r, --remote string      name of the remote url (default "origin")
+  -s, --separator string   column separator character in csv (default ";")
+```
+
+## module-migration commit
+```shell
+$ module-migration commit --help
+
+  MM_CSV          path to csv mapping file (default: "./mapping.csv")
+  MM_SEPARATOR    column separator character in csv (default: ";")
+  MM_OLD          column name or index (starting with 0) containing the old [git] url (default: "0")
+  MM_NEW          column name or index (starting with 0) containing the new [git] url (default: "1")
+  MM_REMOTE       name of the remote url (default: "origin")
+  MM_BRANCH       name of the branch that should be crated for the changes, if empty no branch migration will be executed with git (default: "chore/module-migration")
+  MM_BUMP_TAG     bump latest tag and increase its version by one on the patch level (1.1.5 -> 1.1.6) (default: "false")
+
+Usage:
+  module-migration commit [flags]
+
+Flags:
+  -b, --branch string      name of the branch that should be crated for the changes, if empty no branch migration will be executed with git (default "chore/module-migration")
+  -t, --bump-tag           bump latest tag and increase its version by one on the patch level (1.1.5 -> 1.1.6)
+  -c, --csv string         path to csv mapping file (default "./mapping.csv")
+  -h, --help               help for commit
+  -n, --new string         column name or index (starting with 0) containing the new [git] url (default "1")
+  -o, --old string         column name or index (starting with 0) containing the old [git] url (default "0")
+  -r, --remote string      name of the remote url (default "origin")
+  -s, --separator string   column separator character in csv (default ";")
+```
+
+## module-migration release
+```shell
+module-migration release --help
+
+  MM_REMOTE    name of the remote url (default: "origin")
+  MM_PUSH      push tags to remote repo (default: "false")
+
+Usage:
+  module-migration release [flags]
+
+Flags:
+  -h, --help            help for release
+  -p, --push            push tags to remote repo
+  -r, --remote string   name of the remote url (default "origin")
 ```

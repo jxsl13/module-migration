@@ -11,8 +11,8 @@ type CommitConfig struct {
 	CSVPath string `koanf:"csv" short:"c" description:"path to csv mapping file"`
 
 	Comma     string `koanf:"separator" short:"s" description:"column separator character in csv"`
-	OldColumn string `koanf:"old" short:"o" description:"column name of index (starting with 0) containing the old [git] url"`
-	NewColumn string `koanf:"new" short:"n" description:"column name of index (starting with 0) containing the new [git] url"`
+	OldColumn string `koanf:"old" short:"o" description:"column name or index (starting with 0) containing the old [git] url"`
+	NewColumn string `koanf:"new" short:"n" description:"column name or index (starting with 0) containing the new [git] url"`
 
 	RemoteName string `koanf:"remote" short:"r" description:"name of the remote url"`
 	BranchName string `koanf:"branch" short:"b" description:"name of the branch that should be crated for the changes, if empty no branch migration will be executed with git"`
