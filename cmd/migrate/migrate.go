@@ -135,16 +135,12 @@ func migrateRepo(ctx context.Context,
 	// pull before changing anything
 	_ = utils.GitPull(ctx, repoDir)
 	goMod := filepath.Join(repoDir, "go.mod")
-
 	err = migrateGoMod(ctx, repoDir, goMod, moduleMap)
 	if err != nil {
 		return fmt.Errorf("failed to migrate go mod: %s: %w", goMod, err)
 	}
 
-	goModRe := regexp.MustCompile(goMod + "$")
-	goSumRe := regexp.MustCompile(filepath.Join(repoDir, "go.sum") + "$")
-	exclude = append(exclude, goModRe, goSumRe)
-
+	exclude = append(exclude, regexp.MustCompile(`go\.mod$`), regexp.MustCompile(`go\.sum$`))
 	_, err = utils.ReplaceInDir(repoDir, exclude, include, importReplacer)
 	if err != nil {
 		return err

@@ -4,12 +4,10 @@ import (
 	"io/fs"
 	"path/filepath"
 	"regexp"
-
-	"github.com/jxsl13/cwalk"
 )
 
 func WalkMatching(rootPath string, exclude, include []*regexp.Regexp, walk filepath.WalkFunc) error {
-	return cwalk.Walk(rootPath, func(path string, info fs.FileInfo, err error) error {
+	return filepath.Walk(rootPath, func(path string, info fs.FileInfo, err error) error {
 		if err != nil {
 			return walk(path, nil, err)
 		}

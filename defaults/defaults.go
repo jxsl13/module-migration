@@ -11,13 +11,10 @@ var (
 		`\.yml$`,
 		`\.md$`,
 		`\.MD$`,
-		`go.mod$`,
-		`go.sum$`,
 	}
 
 	Exclude = []string{
 		`\.git$`,
-		`go\.sum$`, // causes checksum mismatch
 	}
 )
 
