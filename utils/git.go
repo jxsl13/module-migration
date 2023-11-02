@@ -158,7 +158,7 @@ func GitFetchPrune(ctx context.Context, repoDir string) error {
 
 // GitPullPrune removes everything that does not exist in the remote repo
 func GitPullPrune(ctx context.Context, repoDir string) error {
-	_, err := ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "pull", "--all", "--tags", "--prune", "--prune-tags", "--force")
+	_, err := ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "pull", "--all", "--tags", "--prune", "--force")
 	if err != nil {
 		return fmt.Errorf("git pull failed in %s: %w", repoDir, err)
 	}
@@ -346,8 +346,14 @@ func GitBumpVersionTag(ctx context.Context, repoDir, remoteName string, major, m
 	}()
 
 	// pull potential changes and overwrite local tags
-	_ = GitFetchPrune(ctx, repoDir)
-	_ = GitPullPrune(ctx, repoDir)
+	err = GitFetchPrune(ctx, repoDir)
+	if err != nil {
+		return err
+	}
+	err = GitPullPrune(ctx, repoDir)
+	if err != nil {
+		return err
+	}
 
 	v, err := GitGetLatestTag(ctx, repoDir)
 	if err != nil {
