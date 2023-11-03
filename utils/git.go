@@ -263,6 +263,7 @@ func GitGetDefaultBranch(ctx context.Context, repoDir, remoteName string) (branc
 }
 
 func GitGetLatestTag(ctx context.Context, repoDir string) (version semver.Version, err error) {
+	version = *semver.MustParse("v0.0.0")
 	lines, err := ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "git", "tag")
 	if err != nil {
 		return version, fmt.Errorf("failed to get latest tag in %s: %w", repoDir, err)
