@@ -200,12 +200,12 @@ func migrateGoMod(ctx context.Context, repoDir, remoteName, goModFilePath string
 			continue
 		}
 
+		fmt.Printf("Found dependency mapping: %s -> %s\n", req.Mod.Path, targetModulePath)
 		err = modFile.DropRequire(req.Mod.Path)
 		if err != nil {
 			return nil, fmt.Errorf("failed to drop old dependency: %s: %w", req.Mod.Path, err)
 		}
 
-		fmt.Printf("Found dependency mapping: %s -> %s\n", req.Mod.Path, targetModulePath)
 		foundDependencies = append(foundDependencies, targetModulePath)
 	}
 
