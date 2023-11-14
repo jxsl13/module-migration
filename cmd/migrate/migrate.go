@@ -163,6 +163,11 @@ func migrateRepo(ctx context.Context,
 		return err
 	}
 
+	err = utils.GoFmt(ctx, repoDir)
+	if err != nil {
+		return err
+	}
+
 	return utils.GoBuildAll(ctx, repoDir)
 }
 

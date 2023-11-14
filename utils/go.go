@@ -28,3 +28,11 @@ func GoGet(ctx context.Context, repoDir string, dependency string) error {
 	}
 	return nil
 }
+
+func GoFmt(ctx context.Context, repoDir string) error {
+	_, err := ExecuteQuietPathApplicationWithOutput(ctx, repoDir, "go", "fmt", "./...")
+	if err != nil {
+		return fmt.Errorf("go fmt ./... failed for repo %s: %w", repoDir, err)
+	}
+	return nil
+}

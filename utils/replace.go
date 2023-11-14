@@ -38,7 +38,7 @@ func ReplaceInDir(rootPath string, exclude, include []*regexp.Regexp, replacer *
 			return err
 		}
 
-		f, err := parser.ParseFile(fset, path, data, parser.AllErrors)
+		f, err := parser.ParseFile(fset, path, data, parser.AllErrors|parser.ParseComments)
 		if err != nil {
 			return fmt.Errorf("invalid Go file: %s: %w", path, err)
 		}
