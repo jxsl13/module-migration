@@ -131,7 +131,7 @@ func migrateRepo(ctx context.Context,
 	// pull before changing anything
 	_ = utils.GitPull(ctx, repoDir)
 	goMod := filepath.Join(repoDir, "go.mod")
-	additionalImports, err := migrateGoMod(ctx, repoDir, remoteName, goMod, moduleMap)
+	missingDependencies, additionalImports, err := migrateGoMod(ctx, repoDir, remoteName, goMod, moduleMap)
 	if err != nil {
 		return fmt.Errorf("failed to migrate go mod: %s: %w", goMod, err)
 	}
@@ -149,6 +149,14 @@ func migrateRepo(ctx context.Context,
 		}
 	}
 
+	for _, dep := range missingDependencies {
+		fmt.Printf("Dependency: updating: %s\n", dep)
+		err = utils.GoGet(ctx, repoDir, fmt.Sprintf("%s@latest", dep))
+		if err != nil {
+			return err
+		}
+	}
+
 	// fix go.sum file
 	err = utils.GoModTidy(ctx, repoDir)
 	if err != nil {
@@ -158,26 +166,26 @@ func migrateRepo(ctx context.Context,
 	return utils.GoBuildAll(ctx, repoDir)
 }
 
-func migrateGoMod(ctx context.Context, repoDir, remoteName, goModFilePath string, moduleMap map[string]string) (map[string]string, error) {
+func migrateGoMod(ctx context.Context, repoDir, remoteName, goModFilePath string, moduleMap map[string]string) ([]string, map[string]string, error) {
 
 	data, err := os.ReadFile(goModFilePath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	modFile, err := modfile.Parse(goModFilePath, data, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read go mod file: %w", err)
+		return nil, nil, fmt.Errorf("failed to read go mod file: %w", err)
 	}
 
 	url, err := utils.GitRemoteUrl(ctx, repoDir, remoteName)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	expectedModuleUrl, err := utils.ToModuleUrl(url)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// map module name
@@ -203,7 +211,7 @@ func migrateGoMod(ctx context.Context, repoDir, remoteName, goModFilePath string
 		fmt.Printf("Found dependency mapping: %s -> %s\n", req.Mod.Path, targetModulePath)
 		err = modFile.DropRequire(req.Mod.Path)
 		if err != nil {
-			return nil, fmt.Errorf("failed to drop old dependency: %s: %w", req.Mod.Path, err)
+			return nil, nil, fmt.Errorf("failed to drop old dependency: %s: %w", req.Mod.Path, err)
 		}
 
 		foundDependencies = append(foundDependencies, targetModulePath)
@@ -213,23 +221,15 @@ func migrateGoMod(ctx context.Context, repoDir, remoteName, goModFilePath string
 
 	data, err = modFile.Format()
 	if err != nil {
-		return nil, fmt.Errorf("failed to format %s: %w", goModFilePath, err)
+		return nil, nil, fmt.Errorf("failed to format %s: %w", goModFilePath, err)
 	}
 
 	err = os.WriteFile(goModFilePath, data, 0666)
 	if err != nil {
-		return nil, fmt.Errorf("failed to write to %s: %w", goModFilePath, err)
+		return nil, nil, fmt.Errorf("failed to write to %s: %w", goModFilePath, err)
 	}
 
-	for _, dep := range foundDependencies {
-		fmt.Printf("Dependency: updating: %s\n", dep)
-		err = utils.GoGet(ctx, repoDir, fmt.Sprintf("%s@latest", dep))
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return additionalImports, nil
+	return foundDependencies, additionalImports, nil
 }
 
 func mergeMaps[K comparable, V any](ms ...map[K]V) map[K]V {

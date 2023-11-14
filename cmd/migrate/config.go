@@ -99,7 +99,7 @@ func (c *MigrateConfig) Validate() error {
 			return err
 		}
 		if !found {
-			return fmt.Errorf("file or directory not found: %s", filename)
+			return fmt.Errorf("additional file or directory not found: %s", filename)
 		}
 	}
 	return nil
