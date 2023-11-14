@@ -16,6 +16,7 @@ go install github.com/jxsl13/module-migration@latest
 
 ## Usage
 
+You need a csv file for a proper mapping of all source Go repositories pointing to a new target repository.
 mapping.csv
 ```csv
 Repo-clone-url;Target-Clone-Url
@@ -32,8 +33,12 @@ export MM_SEPARATOR=";"
 # folder to copy
 export MM_COPY="/home/user/GitHubMigration/.github"
 
+# first replace all imports base don the csv file
 module-migration migrate ./
+# check your staged files and then commit (if the target repository is a github repository, gh is used to create a pull request)
 module-migration commit ./
+
+# after reviewing and merging of the pull request, you can release a patch level update on the default branch.
 module-migration release ./ --push
 ```
 
